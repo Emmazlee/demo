@@ -1,0 +1,18 @@
+{
+  "default_branch": "develop",
+  "branches": [
+    "develop",
+    "fix/issue-217-wave-10-remove-ts-nocheck-from-stellarreceive",
+    "origin"
+  ],
+  "parent": {
+    "develop": null,
+    "fix/issue-217-wave-10-remove-ts-nocheck-from-stellarreceive": "develop",
+    "origin": "develop"
+  },
+  "order": [
+    "develop",
+    "fix/issue-217-wave-10-remove-ts-nocheck-from-stellarreceive",
+    "origin"
+  ]
+}
