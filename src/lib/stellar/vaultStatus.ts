@@ -160,7 +160,7 @@ function toTuple(value: unknown): unknown[] {
 
 function stroopsToXlm(value: unknown): string {
   const stroops = BigInt(valueToString(value) || '0');
-  const whole = stroops / 10_000_000n || 0n ;
+  const whole = stroops / 10_000_000n;
   const fraction = (stroops % 10_000_000n).toString().padStart(7, '0').replace(/0+$/, '');
   return fraction ? `${whole}.${fraction}` : whole.toString();
 }
@@ -394,8 +394,7 @@ async function addClaimAuthorization(
       const entryAddress = Address.fromScAddress(credentials.address().address()).toString();
       if (entryAddress !== signer.address) return entry;
       matchedEntry = true;
-
-      return authorizeEntry(entry, signer.address, validUntilLedger);
+      return authorizeEntry(entry, signer.privateScalar, validUntilLedger, STELLAR_NETWORK.networkPassphrase);
     }),
   );
 
@@ -403,100 +402,6 @@ async function addClaimAuthorization(
     throw new Error('Vault claim simulation did not return recipient authorization');
   }
 
-  return TransactionBuilder.fromXDR(
-    transaction.toXEnvelopeType(),
-    transaction.toEnvelope(),
-    {
-      networkPassphrase: STELLAR_NETWORK.networkPassphrase,
-    },
-  ).addOperation(
-    Operation.invokeHostFunction({
-      function: operation.function,
-      auth,
-    }),
-  ).build();
-}
-
-export async function submitVaultAction(
-  params: SubmitVaultActionParams,
-): Promise<{ hash: string }> {
-  const { action, depositId, actor, signTransaction, claimSigner } = params;
-  const contractId = getVaultStatusContractId();
-  if (!contractId) throw new Error('Stealth vault contract is not configured for Stellar Testnet');
-
-  const server = getServer();
-  const latest = await server.getLatestLedger();
-  const account = await server.getAccount(actor);
-  const transaction = new TransactionBuilder(account, {
-    fee: BASE_FEE,
-    networkPassphrase: STELLAR_NETWORK.networkPassphrase,
-  })
-    .addOperation(
-      new Contract(contractId).call(
-        action,
-        xdr.ScVal.scvBytes(Buffer.from(depositId, 'hex')),
-        xdr.ScVal.scvAddress(Address.fromString(actor).toScAddress()),
-      ),
-    )
-    .setTimeout(30)
-    .build();
-
-  const simulation = await server.simulateTransaction(transaction);
-  if ('error' in simulation) {
-    throw new Error(simulation.error || 'Vault action simulation failed');
-  }
-
-  let prepared = transaction;
-  if (server.assembleTransaction) {
-    prepared = await server.assembleTransaction(transaction, simulation);
-  }
-
-  if (action === 'claim') {
-    if (!claimSigner) throw new Error('Claim signer is required for vault claims');
-    prepared = await addClaimAuthorization(
-      prepared,
-      claimSigner,
-      latest.sequence + 1000,
-    );
-  }
-
-  const signed = await signTransaction(prepared.toXDR());
-  const sent = await server.sendTransaction(signed);
-  if (sent.status === 'ERROR') {
-    throw new Error(sent.errorResult?.toString?.() ?? 'Vault action submission failed');
-  }
-  const hashValue = sent.hash ?? transaction.hash().toString('hex');
-  const polled = await server.pollTransaction(hashValue, { attempts: 30 });
-  if (polled.status === 'FAILED') throw new Error('Vault action transaction failed');
-  return { hash: hashValue };
-}
-
-export async function claimVaultDeposit(
-  deposit: OnChainVaultDeposit,
-  signer: VaultClaimSigner,
-): Promise<{ hash: string }> {
-  return submitVaultAction({
-    action: 'claim',
-    depositId: deposit.id,
-    actor: signer.address,
-    claimSigner: signer,
-    signTransaction: (xdr) => signStellarTransaction(xdr, signer.privateScalar),
-  });
-}
-
-export async function refundVaultDeposit(
-  deposit: OnChainVaultDeposit,
-  actor: string,
-  signTransaction: (xdr: string) => Promise<string>,
-): Promise<{ hash: string }> {
-  return submitVaultAction({
-    action: 'refund',
-    depositId: deposit.id,
-    actor: deposit.sender || actor,
-    signTransaction,
-  });
-}
-
-export function vaultDepositHash(depositId: string): string {
-  return hash(Buffer.from(depositId, 'hex')).toString('hex');
+  operation.auth = auth;
+  return transaction;
 }
